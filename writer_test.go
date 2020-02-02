@@ -18,7 +18,10 @@ func TestWriter(t *testing.T) {
 
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 
-	w := New(logger, dir)
+	w, err := New(logger, Options{
+		Directory: dir,
+	})
+	require.NoError(t, err)
 
 	_, err = w.Write([]byte("foo"))
 	require.NoError(t, err)
