@@ -24,7 +24,9 @@ type Options struct {
 	// When MaximumFileSize == 0, no upper bound will be enforced.
 	// No file will be greater than MaximumFileSize. A Write() which would
 	// exceed MaximumFileSize will instead cause a new file to be created.
-	MaximumFileSize int
+	// If a Write() is attempting to write more bytes than specified by
+	// MaximumFileSize, the write will be skipped.
+	MaximumFileSize int64
 
 	// MaximumLifetime defines the maximum amount of time a file will
 	// be written to before a rotation occurs.
@@ -51,6 +53,12 @@ type Writer struct {
 	// Writes to f are only synchronized once Close() is called,
 	// or when files are being rotated.
 	f *os.File
+	// bytesWritten is the number of bytes written to f so far,
+	// used for size based rotation
+	bytesWritten int64
+	// ts is the creation timestamp of f,
+	// used for time based log rotation
+	ts time.Time
 
 	// queue of entries awaiting to be written
 	queue chan []byte
@@ -84,12 +92,8 @@ func (w *Writer) Close() error {
 	<-w.done
 
 	if w.f != nil {
-		if err := w.f.Sync(); err != nil {
-			return errors.Wrap(err, "failed to sync current log file")
-		}
-
-		if err := w.f.Close(); err != nil {
-			return errors.Wrap(err, "failed to close current log file")
+		if err := w.closeCurrentFile(); err != nil {
+			return err
 		}
 	}
 
@@ -99,25 +103,74 @@ func (w *Writer) Close() error {
 func (w *Writer) listen() {
 	for b := range w.queue {
 		if w.f == nil {
-			path := filepath.Join(w.opts.Directory, w.opts.FileNameFunc())
-			f, err := newFile(path)
-			if err != nil {
-				w.logger.Println(fmt.Sprintf("Failed to create new file at %v", path), err)
+			if err := w.rotate(); err != nil {
+				w.logger.Println("Failed to create log file", err)
 			}
-			w.f = f
+		}
+
+		size := int64(len(b))
+
+		if w.opts.MaximumFileSize != 0 && size > w.opts.MaximumFileSize {
+			w.logger.Println("Attempting to write more bytes than allowed by MaximumFileSize. Skipping.")
+			continue
+		}
+		if w.opts.MaximumFileSize != 0 && w.bytesWritten+size > w.opts.MaximumFileSize {
+			if err := w.rotate(); err != nil {
+				w.logger.Println("Failed to rotate log file", err)
+			}
+		}
+
+		if w.opts.MaximumLifetime != 0 && time.Now().After(w.ts.Add(w.opts.MaximumLifetime)) {
+			if err := w.rotate(); err != nil {
+				w.logger.Println("Failed to rotate log file", err)
+			}
 		}
 
 		if _, err := w.f.Write(b); err != nil {
 			w.logger.Println("Failed to write to file.", err)
 		}
+		w.bytesWritten += size
 	}
 
 	close(w.done)
 }
 
+func (w *Writer) closeCurrentFile() error {
+	if err := w.f.Sync(); err != nil {
+		return errors.Wrap(err, "failed to sync current log file")
+	}
+
+	if err := w.f.Close(); err != nil {
+		return errors.Wrap(err, "failed to close current log file")
+	}
+
+	w.bytesWritten = 0
+	return nil
+}
+
+func (w *Writer) rotate() error {
+	if w.f != nil {
+		if err := w.closeCurrentFile(); err != nil {
+			return err
+		}
+	}
+
+	path := filepath.Join(w.opts.Directory, w.opts.FileNameFunc())
+	f, err := newFile(path)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create new file at %v", path)
+	}
+
+	w.f = f
+	w.bytesWritten = 0
+	w.ts = time.Now().UTC()
+
+	return nil
+}
+
 func New(logger *log.Logger, opts Options) (*Writer, error) {
 	if _, err := os.Stat(opts.Directory); os.IsNotExist(err) {
-		if err := os.MkdirAll(opts.Directory, 0644); err != nil {
+		if err := os.MkdirAll(opts.Directory, os.ModePerm); err != nil {
 			return nil, errors.Wrapf(err, "directory %v does not exist and could not be created", opts.Directory)
 		}
 	}
@@ -140,5 +193,5 @@ func New(logger *log.Logger, opts Options) (*Writer, error) {
 }
 
 func newFile(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0644)
+	return os.OpenFile(path, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0666)
 }
