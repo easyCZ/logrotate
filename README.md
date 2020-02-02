@@ -16,18 +16,30 @@ go get github.com/easyCZ/logrotate
 package main
 
 import (
-	"github.com/easyCZ/logrotate"
+	"fmt"
 	"log"
 	"os"
 	"time"
+    
+    "github.com/easyCZ/logrotate"
 )
 
 func main() {
 	logger := log.New(os.Stderr, "logrotate", log.LstdFlags) // Or any other logger conforming to golang's log.Logger
 	writer, err := logrotate.New(logger, logrotate.Options{
+        // Where should the writer be outputting files?
+        // If the directory does not exist, it will be created.
+        // Required.
 		Directory:       "path/to/my/logs/directory",
+        // What is the maximum size of each file?
+        // Optional. Use 0 for unlimited.
 		MaximumFileSize: 1024 * 1024 * 1024,
+        // How often should a new file be created, based on time?
+        // Optional. Use 0 to disable time based log rotation.
 		MaximumLifetime: time.Hour,
+        // How would you like to name your files?
+        // Invoked each time a new file is being created.
+        FileNameFunc:    logrotate.DefaultFilenameFunc,
 	})
 	if err != nil {
 		// handle err
