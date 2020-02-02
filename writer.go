@@ -1,6 +1,7 @@
 package logrotate
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/pkg/errors"
 	"log"
@@ -14,7 +15,7 @@ func DefaultFilenameFunc() string {
 	return fmt.Sprintf("%s-%s.log", time.Now().UTC().Format(time.RFC3339), RandomHash(3))
 }
 
-// Options define rotation behavior
+// Options define configuration options for Writer
 type Options struct {
 	// Directory defines the directory where log files will be written to.
 	// If the directory does not exist, it will be created.
@@ -53,6 +54,8 @@ type Writer struct {
 	// Writes to f are only synchronized once Close() is called,
 	// or when files are being rotated.
 	f *os.File
+	// bw is a buffered writer for writing to f
+	bw *bufio.Writer
 	// bytesWritten is the number of bytes written to f so far,
 	// used for size based rotation
 	bytesWritten int64
@@ -126,7 +129,7 @@ func (w *Writer) listen() {
 			}
 		}
 
-		if _, err := w.f.Write(b); err != nil {
+		if _, err := w.bw.Write(b); err != nil {
 			w.logger.Println("Failed to write to file.", err)
 		}
 		w.bytesWritten += size
@@ -136,6 +139,10 @@ func (w *Writer) listen() {
 }
 
 func (w *Writer) closeCurrentFile() error {
+	if err := w.bw.Flush(); err != nil {
+		return errors.Wrap(err, "failed to flush buffered writer")
+	}
+
 	if err := w.f.Sync(); err != nil {
 		return errors.Wrap(err, "failed to sync current log file")
 	}
@@ -161,6 +168,7 @@ func (w *Writer) rotate() error {
 		return errors.Wrapf(err, "failed to create new file at %v", path)
 	}
 
+	w.bw = bufio.NewWriter(f)
 	w.f = f
 	w.bytesWritten = 0
 	w.ts = time.Now().UTC()
