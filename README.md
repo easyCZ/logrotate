@@ -54,4 +54,56 @@ func main() {
 }
 ```
 
+### Usage with Golang's log.Logger
+```go
+package main
+
+import (
+	"log"
+	"os"
+
+	"github.com/easyCZ/logrotate"
+)
+
+func main() {
+	// Write logrotate's own log lines to stderr
+	stderrLogger := log.New(os.Stderr, "logrotate", log.LstdFlags)
+
+	writer, err := logrotate.New(stderrLogger, logrotate.Options{
+		Directory: "/path/to/my/logs",
+		// see other options above
+	})
+
+	// Your application logger, using logrotate as the backing Writer implementation.
+	logger := log.New(writer, "application", log.LstdFlags)
+
+    // Ensure all messages are flushed to files before exiting 
+    if err := writer.Close(); err != nil {
+        // handle err
+    }  
+}
+```
+
+### Usage with logrus
+```go
+package main
+
+import (
+	"os"
+	log "github.com/sirupsen/logrus"
+	logrotate "github.com/easyCZ/logrotate"
+)
+
+func init() {
+	writer, err := logrotate.New(logger, logrotate.Options{
+		Directory: "path/to/my/logs/directory",
+	})
+	if err != nil {
+		// handle err
+	}
+	// Output to stdout instead of the default stderr
+	// Can be any io.Writer, see below for File example
+	log.SetOutput(writer)
+}
+```
 
