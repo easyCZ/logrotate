@@ -73,6 +73,9 @@ type Writer struct {
 	done chan struct{}
 }
 
+// Write writes p into the current file, rotating if necessary.
+// Write is non-blocking, if the writer's queue is not full.
+// Write is blocking otherwise.
 func (w *Writer) Write(p []byte) (n int, err error) {
 	select {
 	case <-w.closing:
@@ -87,6 +90,9 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+// Close closes the writer.
+// Any accepted writes will be flushed. Any new writes will be rejected.
+// Once Close() exits, files are synchronized to disk.
 func (w *Writer) Close() error {
 	close(w.closing)
 	w.pending.Wait()
@@ -176,6 +182,7 @@ func (w *Writer) rotate() error {
 	return nil
 }
 
+// New creates a new concurrency safe Writer which performs log rotation.
 func New(logger *log.Logger, opts Options) (*Writer, error) {
 	if _, err := os.Stat(opts.Directory); os.IsNotExist(err) {
 		if err := os.MkdirAll(opts.Directory, os.ModePerm); err != nil {
