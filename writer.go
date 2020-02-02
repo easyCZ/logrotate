@@ -44,6 +44,7 @@ type Options struct {
 	FileNameFunc func() string
 }
 
+// Writer is a concurrency-safe writer with file rotation.
 type Writer struct {
 	logger *log.Logger
 
